@@ -160,12 +160,24 @@ class Morpher:
                                     [0, 0, 0, rightTriangle.vertices[1][0], rightTriangle.vertices[1][1], 1],
                                     [rightTriangle.vertices[2][0], rightTriangle.vertices[2][1], 1, 0, 0, 0],
                                     [0, 0, 0, rightTriangle.vertices[2][0], rightTriangle.vertices[2][1], 1]])
-        lefth = np.linalg.solve(tempLeftMatrix, targetVertices)
-        righth = np.linalg.solve(tempRightMatrix, targetVertices)
+        try:
+            lefth = np.linalg.solve(tempLeftMatrix, targetVertices)
+        except:
+            lefth = np.linalg.solve(tempLeftMatrix + 0.00001*np.random.rand(6, 6), targetVertices)
+        try:
+            righth = np.linalg.solve(tempRightMatrix, targetVertices)
+        except:
+            righth = np.linalg.solve(tempRightMatrix + 0.00001*np.random.rand(6, 6), targetVertices)
         leftH = np.array([[lefth[0][0], lefth[1][0], lefth[2][0]], [lefth[3][0], lefth[4][0], lefth[5][0]], [0, 0, 1]])
         rightH = np.array([[righth[0][0], righth[1][0], righth[2][0]], [righth[3][0], righth[4][0], righth[5][0]], [0, 0, 1]])
-        leftinvH = np.linalg.inv(leftH)
-        rightinvH = np.linalg.inv(rightH)
+        try:
+            leftinvH = np.linalg.inv(leftH)
+        except:
+            leftinvH = np.linalg.inv(leftH + 0.00001*np.random.rand(3, 3))
+        try:
+            rightinvH = np.linalg.inv(rightH)
+        except:
+            rightinvH = np.linalg.inv(rightH + 0.00001*np.random.rand(3, 3))
         targetPoints = targetTriangle.getPoints()  # TODO: ~ 17-18% of runtime
 
         leftSourcePoints = np.transpose(np.matmul(leftinvH, targetPoints))
@@ -222,12 +234,51 @@ def autofeaturepoints(leimg, riimg, featuregridsize, showfeatures):
 
 #####
 
+def resizeAndPad(img, size, padColor=255):
+
+    h, w = img.shape[:2]
+    sh, sw = size
+
+    # interpolation method
+    if h > sh or w > sw: # shrinking image
+        interp = cv2.INTER_AREA
+
+    else: # stretching image
+        interp = cv2.INTER_CUBIC
+
+    # aspect ratio of image
+    aspect = float(w)/h 
+    saspect = float(sw)/sh
+
+    if (saspect > aspect) or ((saspect == 1) and (aspect <= 1)):  # new horizontal image
+        new_h = sh
+        new_w = np.round(new_h * aspect).astype(int)
+        pad_horz = float(sw - new_w) / 2
+        pad_left, pad_right = np.floor(pad_horz).astype(int), np.ceil(pad_horz).astype(int)
+        pad_top, pad_bot = 0, 0
+
+    elif (saspect < aspect) or ((saspect == 1) and (aspect >= 1)):  # new vertical image
+        new_w = sw
+        new_h = np.round(float(new_w) / aspect).astype(int)
+        pad_vert = float(sh - new_h) / 2
+        pad_top, pad_bot = np.floor(pad_vert).astype(int), np.ceil(pad_vert).astype(int)
+        pad_left, pad_right = 0, 0
+
+    # set pad color
+    if len(img.shape) == 3 and not isinstance(padColor, (list, tuple, np.ndarray)): # color image but only one color provided
+        padColor = [padColor]*3
+
+    # scale and pad
+    scaled_img = cv2.resize(img, (new_w, new_h), interpolation=interp)
+    scaled_img = cv2.copyMakeBorder(scaled_img, pad_top, pad_bot, pad_left, pad_right, borderType=cv2.BORDER_CONSTANT, value=padColor)
+
+    return scaled_img
 
 def initmorph(startimgpath,endimgpath,featuregridsize,subpixel,showfeatures,scale) :
     timerstart = time.time()
             
     # left image load
-    leftImageRaw = cv2.imread(startimgpath)
+    leftImageRaw = resizeAndPad(cv2.imread(startimgpath), (120,120))
     # scale image if custom scaling
     if scale != 1.0 :
         leftImageRaw = cv2.resize(leftImageRaw, (int(leftImageRaw.shape[1]*scale),int(leftImageRaw.shape[0]*scale)), interpolation = cv2.INTER_CUBIC)
@@ -236,7 +287,7 @@ def initmorph(startimgpath,endimgpath,featuregridsize,subpixel,showfeatures,scal
         leftImageRaw = cv2.resize(leftImageRaw, (leftImageRaw.shape[1]*subpixel,leftImageRaw.shape[0]*subpixel), interpolation = cv2.INTER_CUBIC)
 
     # right image load
-    rightImageRaw = cv2.imread(endimgpath)
+    rightImageRaw = resizeAndPad(cv2.imread(endimgpath), (120,120))
     # resize image
     rightImageRaw = cv2.resize(rightImageRaw, (leftImageRaw.shape[1],leftImageRaw.shape[0]), interpolation = cv2.INTER_CUBIC)
 
@@ -295,15 +346,21 @@ def morphprocess(mphs,framerate,outimgprefix,subpixel,smoothing) :
         cv2.imwrite(filename,outimage)
         timerelapsed = time.time()-timerstart
         usppx = 1000000 * timerelapsed / (outimage.shape[0]*outimage.shape[1])
-        print(filename+" saved, dimensions "+str(outimage.shape)+" time: "+"{0:.2f}".format(timerelapsed)+" s ; μs/pixel: "+"{0:.2f}".format(usppx) )
+        print(filename+" saved, dimensions "+str(outimage.shape)+" time: "+"{0:.2f}".format(timerelapsed)+" s ; us/pixel: "+"{0:.2f}".format(usppx) )
 
 ####
 
-def batchmorph(imgs,featuregridsize,subpixel,showfeatures,framerate,outimgprefix,smoothing,scale) :
+def batchmorph(imgs,featuregridsize,subpixel,showfeatures,framerate,outimgprefix,smoothing,scale,start=0) :
     global framecnt
     framecnt = 0
     totaltimerstart = time.time()
     for idx in range(len(imgs)-1) :
+        if idx < start:
+            framecnt = framecnt + 1
+            continue
+        filename = outimgprefix+str(framecnt)+".png"
+        cv2.imwrite(filename,resizeAndPad(cv2.imread(imgs[idx]), (120,120)))
+    
         morphprocess(
             initmorph(imgs[idx],imgs[idx+1],featuregridsize,subpixel,showfeatures,scale),
             framerate,outimgprefix,subpixel,smoothing
@@ -335,6 +392,7 @@ margparser.add_argument("-subpixel", type=int, default=msubpixel, help="Subpixel
 margparser.add_argument("-smoothing", type=int, default=msmoothing, help="median_filter smoothing/blur to remove image artifacts, for example -smoothing 2 will blur lightly. (default: %(default)s)")
 margparser.add_argument("-showfeatures", action="store_true", help="Flag to render feature points, for example -showfeatures")
 margparser.add_argument("-scale", type=float, default=mscale, help="Input scaling for preview, for example -scale 0.5 will halve both width and height, processing will be approx. 4x faster. (default: %(default)s)")
+margparser.add_argument("-start", type=int, default=0, help="Start image from. (default: %(default)s)")
 
 args = vars(margparser.parse_args())
 
@@ -365,5 +423,5 @@ print("User input: \r\n"+str(args))
     
 # processing
 
-batchmorph(args['inframes'],args['featuregridsize'],args['subpixel'],args['showfeatures'],args['framerate'],args['outprefix'],args['smoothing'],args['scale'])
+batchmorph(args['inframes'],args['featuregridsize'],args['subpixel'],args['showfeatures'],args['framerate'],args['outprefix'],args['smoothing'],args['scale'], args['start'])
 
