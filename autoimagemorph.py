@@ -234,7 +234,7 @@ def autofeaturepoints(leimg, riimg, featuregridsize, showfeatures):
 
 #####
 
-def resizeAndPad(img, size, padColor=255):
+def resizeAndPad(img, size, padColor=0):
 
     h, w = img.shape[:2]
     sh, sw = size
